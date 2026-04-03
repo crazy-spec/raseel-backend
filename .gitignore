@@ -11,3 +11,12 @@ logs/
 .idea/
 .vscode/
 *.backup
+raseel_dev.db-shm
+raseel_dev.db-wal
+*.db-shm
+*.db-wal
+check_*.py
+fix_*.py
+*.backup
+*.sqlite_backup
+wahbi_dev.db
