@@ -16,6 +16,5 @@ httpx==0.28.0
 langdetect==1.0.9
 hijri-converter==2.3.0
 pytz==2024.2
-structlog==24.4.0httpx>=0.28.0
-slowapi>=0.1.9
+structlog==24.4.0
 slowapi==0.1.9
