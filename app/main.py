@@ -129,17 +129,18 @@ async def setup_admin():
 @app.get("/api/setup/seed-all")
 async def seed_all_sectors():
     try:
-        from app.database import SessionLocal, create_tables
+        from app.database import SessionLocal
         from app.models.user import User
         from app.models.business import Business
         from app.models.product import Product
         from app.models.customer import Customer
         from app.models.conversation import Conversation, Message
+        from app.compliance.encryption import encrypt_data, hash_phone
         import uuid
         from datetime import datetime, timedelta
         import random
+        import hashlib
 
-        create_tables()
         db = SessionLocal()
 
         admin = db.query(User).filter(User.email == "admin@raseel.sa").first()
@@ -147,7 +148,7 @@ async def seed_all_sectors():
             db.close()
             return {"status": "error", "detail": "Admin not found"}
 
-        existing = db.query(Business).filter(Business.owner_id == admin.id).count()
+        existing = db.query(Business).count()
         if existing >= 6:
             db.close()
             return {"status": "already seeded", "businesses": existing}
@@ -214,7 +215,7 @@ async def seed_all_sectors():
                 ("Henna", "حناء", "Traditional henna design", 100.00),
             ]),
             ("Noor Education Center", "مركز نور التعليمي", "education", "Riyadh", "EDU001", [
-                ("Arabic Language Course", "دورة اللغة العربية", "Beginner to advanced Arabic", 800.00),
+                ("Arabic Language Course", "دورة ��للغة العربية", "Beginner to advanced Arabic", 800.00),
                 ("English Language Course", "دورة اللغة الإنجليزية", "IELTS preparation course", 1200.00),
                 ("Math Tutoring", "تدريس رياضيات", "One-on-one math tutoring per hour", 80.00),
                 ("Science Tutoring", "تدريس علوم", "Science subjects tutoring per hour", 80.00),
@@ -227,7 +228,16 @@ async def seed_all_sectors():
             ]),
         ]
 
+        customers_data = [
+            ("Ahmed Al-Ghamdi", "+966501234001"),
+            ("Mohammed Al-Qahtani", "+966501234002"),
+            ("Abdullah Al-Zahrani", "+966501234003"),
+            ("Khalid Al-Harbi", "+966501234004"),
+            ("Sara Al-Mutairi", "+966501234005"),
+        ]
+
         created = []
+
         for i, (name_en, name_ar, sector, city, code, products) in enumerate(sectors):
             biz = Business(
                 id=str(uuid.uuid4()),
@@ -238,7 +248,6 @@ async def seed_all_sectors():
                 whatsapp_phone="+9665011110" + str(i + 1).zfill(2),
                 is_active=True,
                 tier="professional",
-                owner_id=admin.id,
                 access_code=code,
             )
             db.add(biz)
@@ -256,21 +265,24 @@ async def seed_all_sectors():
                     category="item",
                 ))
 
-            customers_data = [
-                ("Ahmed Al-Ghamdi", "+966501234001"),
-                ("Mohammed Al-Qahtani", "+966501234002"),
-                ("Abdullah Al-Zahrani", "+966501234003"),
-                ("Khalid Al-Harbi", "+966501234004"),
-                ("Sara Al-Mutairi", "+966501234005"),
-            ]
-
             for cname, cphone in customers_data:
+                phone_hash = hashlib.sha256(cphone.encode()).hexdigest()
+
+                try:
+                    phone_enc = encrypt_data(cphone)
+                    name_enc = encrypt_data(cname)
+                except Exception:
+                    phone_enc = cphone
+                    name_enc = cname
+
                 c = Customer(
                     id=str(uuid.uuid4()),
                     business_id=biz.id,
-                    name=cname,
-                    phone=cphone,
-                    consent_given=True,
+                    phone_encrypted=phone_enc,
+                    phone_hash=phone_hash,
+                    name_encrypted=name_enc,
+                    consent_status="granted",
+                    consent_granted_at=datetime.utcnow(),
                     created_at=datetime.utcnow() - timedelta(days=random.randint(1, 30)),
                 )
                 db.add(c)
@@ -279,9 +291,9 @@ async def seed_all_sectors():
                 conv = Conversation(
                     id=str(uuid.uuid4()),
                     business_id=biz.id,
-                    customer_phone=cphone,
-                    customer_name=cname,
+                    customer_id=c.id,
                     status="active",
+                    sector_context=sector,
                     created_at=datetime.utcnow() - timedelta(hours=random.randint(1, 72)),
                 )
                 db.add(conv)
@@ -290,14 +302,20 @@ async def seed_all_sectors():
                 db.add(Message(
                     id=str(uuid.uuid4()),
                     conversation_id=conv.id,
-                    role="user",
+                    business_id=biz.id,
+                    direction="inbound",
+                    sender_type="customer",
+                    message_type="text",
                     content="Hello, I need help with " + name_en,
                     created_at=datetime.utcnow() - timedelta(minutes=30),
                 ))
                 db.add(Message(
                     id=str(uuid.uuid4()),
                     conversation_id=conv.id,
-                    role="assistant",
+                    business_id=biz.id,
+                    direction="outbound",
+                    sender_type="ai",
+                    message_type="text",
                     content="Welcome to " + name_en + "! How can I assist you today?",
                     created_at=datetime.utcnow() - timedelta(minutes=29),
                 ))
