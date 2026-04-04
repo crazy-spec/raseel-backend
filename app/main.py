@@ -135,11 +135,10 @@ async def seed_all_sectors():
         from app.models.product import Product
         from app.models.customer import Customer
         from app.models.conversation import Conversation, Message
-       from app.compliance.encryption import encrypt_pii, hash_for_lookup
+        from app.compliance.encryption import encrypt_pii, hash_for_lookup
         import uuid
         from datetime import datetime, timedelta
         import random
-       
 
         db = SessionLocal()
 
@@ -215,7 +214,7 @@ async def seed_all_sectors():
                 ("Henna", "حناء", "Traditional henna design", 100.00),
             ]),
             ("Noor Education Center", "مركز نور التعليمي", "education", "Riyadh", "EDU001", [
-                ("Arabic Language Course", "دورة ��للغة العربية", "Beginner to advanced Arabic", 800.00),
+                ("Arabic Language Course", "دورة اللغة العربية", "Beginner to advanced Arabic", 800.00),
                 ("English Language Course", "دورة اللغة الإنجليزية", "IELTS preparation course", 1200.00),
                 ("Math Tutoring", "تدريس رياضيات", "One-on-one math tutoring per hour", 80.00),
                 ("Science Tutoring", "تدريس علوم", "Science subjects tutoring per hour", 80.00),
@@ -266,20 +265,12 @@ async def seed_all_sectors():
                 ))
 
             for cname, cphone in customers_data:
-               phone_hash = hash_for_lookup(cphone)
-
-                try:phone_enc = encrypt_pii(cphone)
-                    name_enc = encrypt_pii(cname)
-                except Exception:
-                    phone_enc = cphone
-                    name_enc = cname
-
                 c = Customer(
                     id=str(uuid.uuid4()),
                     business_id=biz.id,
-                    phone_encrypted=phone_enc,
-                    phone_hash=phone_hash,
-                    name_encrypted=name_enc,
+                    phone_encrypted=encrypt_pii(cphone),
+                    phone_hash=hash_for_lookup(cphone),
+                    name_encrypted=encrypt_pii(cname),
                     consent_status="granted",
                     consent_granted_at=datetime.utcnow(),
                     created_at=datetime.utcnow() - timedelta(days=random.randint(1, 30)),
