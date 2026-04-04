@@ -4,8 +4,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from app.config import get_settings
 from app.database import create_tables
 from app.services.rate_limiter import setup_rate_limiting
@@ -17,19 +15,18 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     print("")
     print("  +==================================================+")
-    print("  |  Raseel Platform v" + settings.app_version + "                          |")
+    print("  |  Raseel Platform                                 |")
     print("  +==================================================+")
     try:
         create_tables()
         print("  |  Database:        Ready                         |")
     except Exception as e:
         print("  |  Database Error:  " + str(e)[:28] + "  |")
-    
-    # Auto-create admin on startup
+
     try:
         from app.database import get_db
         from app.models.user import User
-        from app.core.security import get_password_hash
+        from app.auth.utils import hash_password
         import uuid
         db = next(get_db())
         existing = db.query(User).filter(User.email == "admin@raseel.sa").first()
@@ -37,7 +34,7 @@ async def lifespan(app: FastAPI):
             admin = User(
                 id=str(uuid.uuid4()),
                 email="admin@raseel.sa",
-                hashed_password=get_password_hash("Raseel2026!"),
+                password_hash=hash_password("Raseel2026!"),
                 full_name="Raseel Admin",
                 role="super_admin",
                 is_active=True
@@ -46,10 +43,14 @@ async def lifespan(app: FastAPI):
             db.commit()
             print("  |  Admin:           Created                       |")
         else:
-            print("  |  Admin:           Already exists                |")
+            existing.password_hash = hash_password("Raseel2026!")
+            existing.role = "super_admin"
+            existing.is_active = True
+            db.commit()
+            print("  |  Admin:           Updated                       |")
     except Exception as e:
         print("  |  Admin Error:     " + str(e)[:28] + "  |")
-    
+
     print("  +==================================================+")
     yield
     print("")
@@ -100,16 +101,20 @@ async def setup_admin():
     try:
         from app.database import get_db
         from app.models.user import User
-        from app.core.security import get_password_hash
+        from app.auth.utils import hash_password
         import uuid
         db = next(get_db())
         existing = db.query(User).filter(User.email == "admin@raseel.sa").first()
         if existing:
-            return {"status": "already exists", "email": "admin@raseel.sa"}
+            existing.password_hash = hash_password("Raseel2026!")
+            existing.role = "super_admin"
+            existing.is_active = True
+            db.commit()
+            return {"status": "updated", "email": "admin@raseel.sa", "role": "super_admin"}
         admin = User(
             id=str(uuid.uuid4()),
             email="admin@raseel.sa",
-            hashed_password=get_password_hash("Raseel2026!"),
+            password_hash=hash_password("Raseel2026!"),
             full_name="Raseel Admin",
             role="super_admin",
             is_active=True
