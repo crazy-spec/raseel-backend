@@ -135,11 +135,11 @@ async def seed_all_sectors():
         from app.models.product import Product
         from app.models.customer import Customer
         from app.models.conversation import Conversation, Message
-        from app.compliance.encryption import encrypt_data, hash_phone
+       from app.compliance.encryption import encrypt_pii, hash_for_lookup
         import uuid
         from datetime import datetime, timedelta
         import random
-        import hashlib
+       
 
         db = SessionLocal()
 
@@ -266,11 +266,10 @@ async def seed_all_sectors():
                 ))
 
             for cname, cphone in customers_data:
-                phone_hash = hashlib.sha256(cphone.encode()).hexdigest()
+               phone_hash = hash_for_lookup(cphone)
 
-                try:
-                    phone_enc = encrypt_data(cphone)
-                    name_enc = encrypt_data(cname)
+                try:phone_enc = encrypt_pii(cphone)
+                    name_enc = encrypt_pii(cname)
                 except Exception:
                     phone_enc = cphone
                     name_enc = cname
