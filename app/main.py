@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -18,25 +18,39 @@ async def lifespan(app: FastAPI):
     print("")
     print("  +==================================================+")
     print("  |  Raseel Platform v" + settings.app_version + "                          |")
-    print("  |  Environment: " + settings.app_env + "                          |")
-    print("  |  Data Region: " + settings.data_region + "                      |")
     print("  +==================================================+")
     try:
         create_tables()
         print("  |  Database:        Ready                         |")
     except Exception as e:
         print("  |  Database Error:  " + str(e)[:28] + "  |")
-    print("  |  PDPL Compliance: Active                        |")
-    print("  |  AI Agents:       Loaded                        |")
-    print("  |  Prayer Times:    Active                        |")
-    print("  |  Auth System:     Active                        |")
-    print("  |  Rate Limiting:   Active                        |")
-    print("  |  Guardrails:      Active                        |")
+    
+    # Auto-create admin on startup
+    try:
+        from app.database import get_db
+        from app.models.user import User
+        from app.core.security import get_password_hash
+        import uuid
+        db = next(get_db())
+        existing = db.query(User).filter(User.email == "admin@raseel.sa").first()
+        if not existing:
+            admin = User(
+                id=str(uuid.uuid4()),
+                email="admin@raseel.sa",
+                hashed_password=get_password_hash("Raseel2026!"),
+                full_name="Raseel Admin",
+                role="super_admin",
+                is_active=True
+            )
+            db.add(admin)
+            db.commit()
+            print("  |  Admin:           Created                       |")
+        else:
+            print("  |  Admin:           Already exists                |")
+    except Exception as e:
+        print("  |  Admin Error:     " + str(e)[:28] + "  |")
+    
     print("  +==================================================+")
-    print("  |  Docs:    http://127.0.0.1:8000/api/docs        |")
-    print("  |  Health:  http://127.0.0.1:8000/api/health      |")
-    print("  +==================================================+")
-    print("")
     yield
     print("")
     print("  Raseel Platform stopped.")
@@ -81,6 +95,32 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics &
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["WhatsApp Webhooks"])
 
 
+@app.get("/api/setup/create-admin")
+async def setup_admin():
+    try:
+        from app.database import get_db
+        from app.models.user import User
+        from app.core.security import get_password_hash
+        import uuid
+        db = next(get_db())
+        existing = db.query(User).filter(User.email == "admin@raseel.sa").first()
+        if existing:
+            return {"status": "already exists", "email": "admin@raseel.sa"}
+        admin = User(
+            id=str(uuid.uuid4()),
+            email="admin@raseel.sa",
+            hashed_password=get_password_hash("Raseel2026!"),
+            full_name="Raseel Admin",
+            role="super_admin",
+            is_active=True
+        )
+        db.add(admin)
+        db.commit()
+        return {"status": "created", "email": "admin@raseel.sa"}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
 @app.get("/")
 async def root():
     return {
@@ -89,15 +129,4 @@ async def root():
         "status": "running",
         "region": settings.data_region,
         "pdpl_compliant": True,
-        "rate_limiting": True,
-        "ai_guardrails": True,
-        "endpoints": {
-            "docs": "/api/docs",
-            "health": "/api/health",
-            "auth": "/api/auth",
-            "businesses": "/api/businesses",
-            "products": "/api/products/?business_id=xxx",
-            "conversations": "/api/conversations/process",
-            "webhooks": "/api/webhooks/whatsapp",
-        },
     }
