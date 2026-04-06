@@ -1,9 +1,9 @@
-﻿from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import os
 
-from app.database import get_db, USE_SQLITE
+from app.database import get_db, engine
 from app.models.business import Business
 from app.models.product import Product
 from app.models.customer import Customer
@@ -12,6 +12,8 @@ from app.models.message import Message
 
 router = APIRouter()
 
+IS_POSTGRES = "postgresql" in str(engine.url)
+
 
 @router.get("/health")
 async def health_check():
@@ -19,7 +21,7 @@ async def health_check():
         "status": "healthy",
         "platform": "Raseel",
         "timestamp": datetime.utcnow().isoformat(),
-        "database": "PostgreSQL" if not USE_SQLITE else "SQLite",
+        "database": "PostgreSQL" if IS_POSTGRES else "SQLite",
         "pdpl_compliant": True,
         "data_region": "Saudi Arabia",
     }
@@ -64,7 +66,7 @@ async def platform_stats(db: Session = Depends(get_db)):
 
         return {
             "status": "healthy",
-            "database": "PostgreSQL" if not USE_SQLITE else "SQLite",
+            "database": "PostgreSQL" if IS_POSTGRES else "SQLite",
             "totals": {
                 "businesses": businesses,
                 "products": products,
@@ -86,4 +88,3 @@ async def platform_stats(db: Session = Depends(get_db)):
         }
     except Exception as e:
         return {"status": "error", "error": str(e)}
-
