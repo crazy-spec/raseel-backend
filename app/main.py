@@ -1,8 +1,10 @@
 import os
 import sys
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.config import get_settings
 from app.database import create_tables
@@ -237,6 +239,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print("  |  Seed Error:      " + str(e)[:28] + "  |")
 
+    # KEEP DATABASE ALIVE — ping every 4 minutes
+    async def keep_db_alive():
+        while True:
+            try:
+                await asyncio.sleep(240)
+                from app.database import SessionLocal
+                db_ping = SessionLocal()
+                db_ping.execute(text("SELECT 1"))
+                db_ping.close()
+            except Exception:
+                pass
+
+    asyncio.create_task(keep_db_alive())
+
+    print("  |  DB KeepAlive:    Active                        |")
     print("  +==================================================+")
     yield
     print("")
