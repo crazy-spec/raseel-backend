@@ -1,5 +1,7 @@
-﻿import logging
-from datetime import datetime
+import logging
+import os
+import secrets
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -12,6 +14,10 @@ from app.auth.dependencies import get_current_user, require_super_admin
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="", tags=["Authentication"])
+
+# Simple in-memory store for reset tokens
+# In production use Redis or database table
+reset_tokens = {}
 
 
 # ============================================================
@@ -61,6 +67,109 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+# ============================================================
+#  EMAIL HELPER
+# ============================================================
+
+def send_reset_email(to_email: str, reset_token: str, full_name: str):
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        smtp_email = os.getenv("SMTP_EMAIL", "")
+        smtp_password = os.getenv("SMTP_PASSWORD", "")
+
+        if not smtp_email or not smtp_password:
+            logger.error("SMTP credentials not set")
+            return False
+
+        reset_url = "https://raseel-frontend-0.vercel.app/reset-password?token=" + reset_token
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = "Raseel — Reset Your Password"
+        msg["From"] = "Raseel Platform <" + smtp_email + ">"
+        msg["To"] = to_email
+
+        text_content = """
+Hello """ + full_name + """,
+
+You requested to reset your Raseel password.
+
+Click the link below to reset your password:
+""" + reset_url + """
+
+This link expires in 1 hour.
+
+If you did not request this, ignore this email.
+
+Raseel Platform
+رسيل — منصة الأتمتة الذكية
+"""
+
+        html_content = """
+<html>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(135deg, #4f46e5, #7c3aed); padding: 30px; border-radius: 12px; text-align: center; margin-bottom: 30px;">
+    <h1 style="color: white; margin: 0; font-size: 28px;">Raseel رسيل</h1>
+    <p style="color: rgba(255,255,255,0.8); margin: 5px 0 0 0;">AI WhatsApp Automation</p>
+  </div>
+  
+  <h2 style="color: #1f2937;">Hello """ + full_name + """,</h2>
+  
+  <p style="color: #4b5563; font-size: 16px;">
+    You requested to reset your Raseel password. Click the button below:
+  </p>
+  
+  <div style="text-align: center; margin: 30px 0;">
+    <a href=" """ + reset_url + """ " 
+       style="background: #4f46e5; color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-size: 16px; font-weight: bold; display: inline-block;">
+      Reset My Password
+    </a>
+  </div>
+  
+  <p style="color: #6b7280; font-size: 14px;">
+    This link expires in <strong>1 hour</strong>.
+  </p>
+  
+  <p style="color: #6b7280; font-size: 14px;">
+    If you did not request this, ignore this email.
+  </p>
+  
+  <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+  
+  <p style="color: #9ca3af; font-size: 12px; text-align: center;">
+    Raseel Platform — Built in Dammam, Saudi Arabia 🇸🇦<br>
+    رسيل — منصة الأتمتة الذكية للأعمال السعودية
+  </p>
+</body>
+</html>
+"""
+
+        msg.attach(MIMEText(text_content, "plain"))
+        msg.attach(MIMEText(html_content, "html"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(smtp_email, smtp_password)
+            server.sendmail(smtp_email, to_email, msg.as_string())
+
+        logger.info("Reset email sent to: " + to_email)
+        return True
+
+    except Exception as e:
+        logger.error("Email send failed: " + str(e))
+        return False
+
+
 # ============================================================
 #  ROUTES
 # ============================================================
@@ -69,26 +178,21 @@ class ChangePasswordRequest(BaseModel):
 def register(req: RegisterRequest, db: Session = Depends(get_db)):
     """Register a new business owner account."""
 
-    # Validate email format (basic check)
     if "@" not in req.email or "." not in req.email:
         raise HTTPException(status_code=400, detail="Invalid email format.")
 
-    # Validate password length
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
 
-    # Check if email already exists
     existing = db.query(User).filter(User.email == req.email.lower().strip()).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered.")
 
-    # Check if phone already exists
     if req.phone:
         existing_phone = db.query(User).filter(User.phone == req.phone.strip()).first()
         if existing_phone:
             raise HTTPException(status_code=400, detail="Phone number already registered.")
 
-    # Create user (always business_owner via public registration)
     user = User(
         email=req.email.lower().strip(),
         password_hash=hash_password(req.password),
@@ -103,7 +207,7 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-    logger.info("New user registered: " + user.email + " (role=" + user.role + ")")
+    logger.info("New user registered: " + user.email)
 
     token = create_access_token({"sub": user.id, "role": user.role})
 
@@ -150,11 +254,10 @@ def update_me(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Update current user profile (name, phone)."""
+    """Update current user profile."""
     if req.full_name is not None:
         user.full_name = req.full_name.strip()
     if req.phone is not None:
-        # Check phone uniqueness
         if req.phone.strip():
             existing = db.query(User).filter(
                 User.phone == req.phone.strip(),
@@ -189,6 +292,63 @@ def change_password(
     db.commit()
 
     return {"message": "Password changed successfully."}
+
+
+@router.post("/forgot-password")
+def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Send password reset email."""
+
+    user = db.query(User).filter(User.email == req.email.lower().strip()).first()
+
+    if not user:
+        return {"message": "If this email exists, a reset link has been sent."}
+
+    reset_token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(hours=1)
+
+    reset_tokens[reset_token] = {
+        "user_id": user.id,
+        "email": user.email,
+        "expires_at": expires_at,
+    }
+
+    send_reset_email(user.email, reset_token, user.full_name)
+
+    logger.info("Password reset requested for: " + user.email)
+
+    return {"message": "If this email exists, a reset link has been sent."}
+
+
+@router.post("/reset-password")
+def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Reset password using token from email."""
+
+    token_data = reset_tokens.get(req.token)
+
+    if not token_data:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token.")
+
+    if datetime.utcnow() > token_data["expires_at"]:
+        del reset_tokens[req.token]
+        raise HTTPException(status_code=400, detail="Reset token has expired.")
+
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+
+    user = db.query(User).filter(User.id == token_data["user_id"]).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    user.password_hash = hash_password(req.new_password)
+    user.updated_at = datetime.utcnow()
+    db.commit()
+
+    del reset_tokens[req.token]
+
+    logger.info("Password reset successful for: " + user.email)
+
+    return {"message": "Password reset successful. You can now login."}
 
 
 # ============================================================
