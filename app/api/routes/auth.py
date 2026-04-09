@@ -15,10 +15,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="", tags=["Authentication"])
 
-# Simple in-memory store for reset tokens
-# In production use Redis or database table
-reset_tokens = {}
-
 
 # ============================================================
 #  REQUEST / RESPONSE MODELS
@@ -77,44 +73,21 @@ class ResetPasswordRequest(BaseModel):
 
 
 # ============================================================
-#  EMAIL HELPER
+#  EMAIL HELPER — RESEND
 # ============================================================
 
 def send_reset_email(to_email: str, reset_token: str, full_name: str):
     try:
-        import smtplib
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
+        import resend
 
-        smtp_email = os.getenv("SMTP_EMAIL", "")
-        smtp_password = os.getenv("SMTP_PASSWORD", "")
+        resend.api_key = os.getenv("RESEND_API_KEY", "")
 
-        if not smtp_email or not smtp_password:
-            logger.error("SMTP credentials not set")
+        if not resend.api_key:
+            logger.error("RESEND_API_KEY not set in environment")
             return False
 
-        reset_url = "https://raseel-frontend-0.vercel.app/reset-password?token=" + reset_token
-
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = "Raseel — Reset Your Password"
-        msg["From"] = "Raseel Platform <" + smtp_email + ">"
-        msg["To"] = to_email
-
-        text_content = """
-Hello """ + full_name + """,
-
-You requested to reset your Raseel password.
-
-Click the link below to reset your password:
-""" + reset_url + """
-
-This link expires in 1 hour.
-
-If you did not request this, ignore this email.
-
-Raseel Platform
-رسيل — منصة الأتمتة الذكية
-"""
+        frontend_url = os.getenv("FRONTEND_URL", "https://raseel-frontend-0.vercel.app")
+        reset_url = frontend_url + "/reset-password?token=" + reset_token
 
         html_content = """
 <html>
@@ -123,30 +96,30 @@ Raseel Platform
     <h1 style="color: white; margin: 0; font-size: 28px;">Raseel رسيل</h1>
     <p style="color: rgba(255,255,255,0.8); margin: 5px 0 0 0;">AI WhatsApp Automation</p>
   </div>
-  
+
   <h2 style="color: #1f2937;">Hello """ + full_name + """,</h2>
-  
+
   <p style="color: #4b5563; font-size: 16px;">
     You requested to reset your Raseel password. Click the button below:
   </p>
-  
+
   <div style="text-align: center; margin: 30px 0;">
-    <a href=" """ + reset_url + """ " 
+    <a href=" """ + reset_url + """ "
        style="background: #4f46e5; color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-size: 16px; font-weight: bold; display: inline-block;">
       Reset My Password
     </a>
   </div>
-  
+
   <p style="color: #6b7280; font-size: 14px;">
     This link expires in <strong>1 hour</strong>.
   </p>
-  
+
   <p style="color: #6b7280; font-size: 14px;">
     If you did not request this, ignore this email.
   </p>
-  
+
   <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
-  
+
   <p style="color: #9ca3af; font-size: 12px; text-align: center;">
     Raseel Platform — Built in Dammam, Saudi Arabia 🇸🇦<br>
     رسيل — منصة الأتمتة الذكية للأعمال السعودية
@@ -155,18 +128,31 @@ Raseel Platform
 </html>
 """
 
-        msg.attach(MIMEText(text_content, "plain"))
-        msg.attach(MIMEText(html_content, "html"))
+        text_content = (
+            "Hello " + full_name + ",\n\n"
+            "You requested to reset your Raseel password.\n\n"
+            "Click the link below to reset your password:\n"
+            + reset_url + "\n\n"
+            "This link expires in 1 hour.\n\n"
+            "If you did not request this, ignore this email.\n\n"
+            "Raseel Platform\n"
+            "رسيل — منصة الأتمتة الذكية"
+        )
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(smtp_email, smtp_password)
-            server.sendmail(smtp_email, to_email, msg.as_string())
+        params = {
+            "from": "Raseel Platform <onboarding@resend.dev>",
+            "to": [to_email],
+            "subject": "Raseel — Reset Your Password",
+            "html": html_content,
+            "text": text_content,
+        }
 
-        logger.info("Reset email sent to: " + to_email)
+        resend.Emails.send(params)
+        logger.info("Reset email sent via Resend to: " + to_email)
         return True
 
     except Exception as e:
-        logger.error("Email send failed: " + str(e))
+        logger.error("Resend email failed: " + str(e))
         return False
 
 
@@ -296,7 +282,7 @@ def change_password(
 
 @router.post("/forgot-password")
 def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    """Send password reset email."""
+    """Send password reset email via Resend."""
 
     user = db.query(User).filter(User.email == req.email.lower().strip()).first()
 
@@ -306,11 +292,9 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     reset_token = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(hours=1)
 
-    reset_tokens[reset_token] = {
-        "user_id": user.id,
-        "email": user.email,
-        "expires_at": expires_at,
-    }
+    user.reset_token = reset_token
+    user.reset_token_expires = expires_at
+    db.commit()
 
     send_reset_email(user.email, reset_token, user.full_name)
 
@@ -321,30 +305,27 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
 
 @router.post("/reset-password")
 def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
-    """Reset password using token from email."""
+    """Reset password using token stored in database."""
 
-    token_data = reset_tokens.get(req.token)
+    user = db.query(User).filter(User.reset_token == req.token).first()
 
-    if not token_data:
+    if not user:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token.")
 
-    if datetime.utcnow() > token_data["expires_at"]:
-        del reset_tokens[req.token]
+    if not user.reset_token_expires or datetime.utcnow() > user.reset_token_expires:
+        user.reset_token = None
+        user.reset_token_expires = None
+        db.commit()
         raise HTTPException(status_code=400, detail="Reset token has expired.")
 
     if len(req.new_password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
 
-    user = db.query(User).filter(User.id == token_data["user_id"]).first()
-
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found.")
-
     user.password_hash = hash_password(req.new_password)
+    user.reset_token = None
+    user.reset_token_expires = None
     user.updated_at = datetime.utcnow()
     db.commit()
-
-    del reset_tokens[req.token]
 
     logger.info("Password reset successful for: " + user.email)
 
