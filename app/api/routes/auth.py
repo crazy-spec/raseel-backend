@@ -2,7 +2,7 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
@@ -81,8 +81,6 @@ def send_reset_email(to_email: str, reset_token: str, full_name: str):
         import resend
 
         api_key = os.getenv("RESEND_API_KEY", "")
-        logger.info("Resend API key present: " + str(bool(api_key)))
-        logger.info("Resend API key starts with: " + api_key[:6] if api_key else "EMPTY")
 
         if not api_key:
             logger.error("RESEND_API_KEY is not set in environment")
@@ -91,7 +89,7 @@ def send_reset_email(to_email: str, reset_token: str, full_name: str):
         resend.api_key = api_key
 
         frontend_url = os.getenv("FRONTEND_URL", "https://raseel-frontend-0.vercel.app")
-        reset_url = frontend_url + "/reset-password?token=" + reset_token
+        reset_url = frontend_url.strip() + "/reset-password?token=" + reset_token
 
         html_content = """
 <html>
@@ -152,8 +150,8 @@ def send_reset_email(to_email: str, reset_token: str, full_name: str):
         }
 
         result = resend.Emails.send(params)
-        logger.info("Resend result: " + str(result))
         logger.info("Reset email sent via Resend to: " + to_email)
+        logger.info("Resend result: " + str(result))
         return True
 
     except Exception as e:
@@ -337,51 +335,6 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
 
 
 # ============================================================
-#  DEBUG ROUTE — REMOVE AFTER TESTING
-# ============================================================
-
-@router.get("/test-resend")
-def test_resend():
-    """Test Resend API key and send a test email."""
-    try:
-        import resend
-
-        api_key = os.getenv("RESEND_API_KEY", "")
-        frontend_url = os.getenv("FRONTEND_URL", "NOT SET")
-
-        if not api_key:
-            return {
-                "status": "error",
-                "reason": "RESEND_API_KEY is empty or not set in environment"
-            }
-
-        resend.api_key = api_key
-
-        params = {
-            "from": "Raseel Platform <onboarding@resend.dev>",
-            "to": ["raseelsupportsa@gmail.com"],
-            "subject": "Raseel — Resend Test Email",
-            "html": "<h1>Raseel Test</h1><p>Resend is working correctly.</p>",
-            "text": "Raseel Test — Resend is working correctly.",
-        }
-
-        result = resend.Emails.send(params)
-
-        return {
-            "status": "success",
-            "resend_result": str(result),
-            "api_key_prefix": api_key[:8],
-            "frontend_url": frontend_url,
-        }
-
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-        }
-
-
-# ============================================================
 #  ADMIN-ONLY ROUTES
 # ============================================================
 
@@ -402,7 +355,7 @@ def change_user_role(
     admin: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
-    """Change a user's role (super_admin only)."""
+    """Change a user role (super_admin only)."""
     valid_roles = [r.value for r in UserRole]
     if role not in valid_roles:
         raise HTTPException(
