@@ -80,11 +80,15 @@ def send_reset_email(to_email: str, reset_token: str, full_name: str):
     try:
         import resend
 
-        resend.api_key = os.getenv("RESEND_API_KEY", "")
+        api_key = os.getenv("RESEND_API_KEY", "")
+        logger.info("Resend API key present: " + str(bool(api_key)))
+        logger.info("Resend API key starts with: " + api_key[:6] if api_key else "EMPTY")
 
-        if not resend.api_key:
-            logger.error("RESEND_API_KEY not set in environment")
+        if not api_key:
+            logger.error("RESEND_API_KEY is not set in environment")
             return False
+
+        resend.api_key = api_key
 
         frontend_url = os.getenv("FRONTEND_URL", "https://raseel-frontend-0.vercel.app")
         reset_url = frontend_url + "/reset-password?token=" + reset_token
@@ -147,7 +151,8 @@ def send_reset_email(to_email: str, reset_token: str, full_name: str):
             "text": text_content,
         }
 
-        resend.Emails.send(params)
+        result = resend.Emails.send(params)
+        logger.info("Resend result: " + str(result))
         logger.info("Reset email sent via Resend to: " + to_email)
         return True
 
@@ -296,9 +301,8 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     user.reset_token_expires = expires_at
     db.commit()
 
-    send_reset_email(user.email, reset_token, user.full_name)
-
-    logger.info("Password reset requested for: " + user.email)
+    email_sent = send_reset_email(user.email, reset_token, user.full_name)
+    logger.info("Email send result: " + str(email_sent))
 
     return {"message": "If this email exists, a reset link has been sent."}
 
@@ -330,6 +334,51 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
     logger.info("Password reset successful for: " + user.email)
 
     return {"message": "Password reset successful. You can now login."}
+
+
+# ============================================================
+#  DEBUG ROUTE — REMOVE AFTER TESTING
+# ============================================================
+
+@router.get("/test-resend")
+def test_resend():
+    """Test Resend API key and send a test email."""
+    try:
+        import resend
+
+        api_key = os.getenv("RESEND_API_KEY", "")
+        frontend_url = os.getenv("FRONTEND_URL", "NOT SET")
+
+        if not api_key:
+            return {
+                "status": "error",
+                "reason": "RESEND_API_KEY is empty or not set in environment"
+            }
+
+        resend.api_key = api_key
+
+        params = {
+            "from": "Raseel Platform <onboarding@resend.dev>",
+            "to": ["raseelsupportsa@gmail.com"],
+            "subject": "Raseel — Resend Test Email",
+            "html": "<h1>Raseel Test</h1><p>Resend is working correctly.</p>",
+            "text": "Raseel Test — Resend is working correctly.",
+        }
+
+        result = resend.Emails.send(params)
+
+        return {
+            "status": "success",
+            "resend_result": str(result),
+            "api_key_prefix": api_key[:8],
+            "frontend_url": frontend_url,
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+        }
 
 
 # ============================================================
