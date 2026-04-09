@@ -1,4 +1,4 @@
-﻿import uuid
+import uuid
 import enum
 from datetime import datetime
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
@@ -24,6 +24,10 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Password reset fields
+    reset_token = Column(String, nullable=True)
+    reset_token_expires = Column(DateTime, nullable=True)
 
     def __repr__(self):
         return "<User " + self.email + " role=" + self.role + ">"
