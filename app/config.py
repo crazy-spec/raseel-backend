@@ -17,10 +17,11 @@ class Settings:
         self.app_version = os.getenv("APP_VERSION", "2.0.0")
         self.app_env = os.getenv("APP_ENV", "development")
         self.debug = os.getenv("DEBUG", "true").lower() == "true"
-        self.data_region = os.getenv("DATA_REGION", "sa-riyadh-1")
-        self.database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./raseel_dev.db")
-        self.sync_database_url = os.getenv("SYNC_DATABASE_URL", "sqlite:///./raseel_dev.db")
+        self.data_region = os.getenv("DATA_REGION", "Saudi Arabia")
+
+        self.database_url = os.getenv("DATABASE_URL", "sqlite:///./raseel_dev.db")
         self.secret_key = os.getenv("SECRET_KEY", "raseel-secret-key-change-in-production-2026")
+
         self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
         self.whatsapp_token = os.getenv("WHATSAPP_TOKEN", "")
         self.whatsapp_verify_token = os.getenv("WHATSAPP_VERIFY_TOKEN", "raseel-webhook-verify-2026")
